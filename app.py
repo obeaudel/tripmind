@@ -1,4 +1,5 @@
 import gradio as gr
+import spaces
 from dotenv import load_dotenv
 import anthropic
 
@@ -43,6 +44,7 @@ def _itinerary_md(it: dict) -> str:
 
 # ── Chat handler ──────────────────────────────────────────────────────────────
 
+@spaces.GPU
 def respond(message: str, history: list, state: dict):
     """Called on every user message. Returns (history, state, pdf_update, cleared_input)."""
     if not message.strip():
