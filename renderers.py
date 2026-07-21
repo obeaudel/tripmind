@@ -4,15 +4,38 @@ from datetime import datetime
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
-# Arial TTF paths (macOS). On Linux, point to e.g. /usr/share/fonts/truetype/msttcorefonts/
-_FONT_DIR = "/System/Library/Fonts/Supplemental"
+# Bundled DejaVu Sans — ships with the repo so rendering is identical locally
+# and on the deployed (Linux) HF Space, and covers the accented characters and
+# typographic punctuation that Claude's generated text and place names use.
+_FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 _FONTS = {
-    "":   os.path.join(_FONT_DIR, "Arial.ttf"),
-    "B":  os.path.join(_FONT_DIR, "Arial Bold.ttf"),
-    "I":  os.path.join(_FONT_DIR, "Arial Italic.ttf"),
-    "BI": os.path.join(_FONT_DIR, "Arial Bold Italic.ttf"),
+    "":   os.path.join(_FONT_DIR, "DejaVuSans.ttf"),
+    "B":  os.path.join(_FONT_DIR, "DejaVuSans-Bold.ttf"),
+    "I":  os.path.join(_FONT_DIR, "DejaVuSans-Oblique.ttf"),
+    "BI": os.path.join(_FONT_DIR, "DejaVuSans-BoldOblique.ttf"),
 }
 _USE_TTF = all(os.path.exists(p) for p in _FONTS.values())
+
+# Characters fpdf2's core (non-Unicode) fonts can't encode, mapped to ASCII
+# equivalents. Applied as a belt-and-suspenders pass even with a Unicode font,
+# since it also normalizes typography for a plainer, more consistent look.
+_PDF_CHAR_MAP = {
+    "‘": "'", "’": "'",   # ‘ ’
+    "“": '"', "”": '"',  # “ ”
+    "–": "-", "—": "-",  # – —
+    "…": "...",               # …
+    " ": " ",                 # non-breaking space
+}
+
+
+def sanitize_for_pdf(text) -> str:
+    """Replace smart quotes/dashes/ellipsis with ASCII equivalents before writing to the PDF."""
+    if text is None:
+        return ""
+    text = str(text)
+    for char, replacement in _PDF_CHAR_MAP.items():
+        text = text.replace(char, replacement)
+    return text
 
 _BLUE   = (20, 60, 140)
 _DARK   = (30, 30, 30)
@@ -80,7 +103,7 @@ class _TripPDF(FPDF):
         self.set_font(self.font_name, "B", 11)
         self.set_fill_color(*_FILL)
         self.set_text_color(*_BLUE)
-        self.cell(0, 8, f"  {title}", fill=True,
+        self.cell(0, 8, f"  {sanitize_for_pdf(title)}", fill=True,
                   new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.set_text_color(*_DARK)
         self.ln(3)
@@ -88,22 +111,22 @@ class _TripPDF(FPDF):
     def place_heading(self, name: str, detail: str, price: str = "") -> None:
         self.set_font(self.font_name, "B", 10)
         self.set_text_color(*_DARK)
-        label = f"{name}  |  {detail}"
+        label = f"{sanitize_for_pdf(name)}  |  {sanitize_for_pdf(detail)}"
         if price:
-            label += f"  |  {price}"
+            label += f"  |  {sanitize_for_pdf(price)}"
         self.multi_cell(0, 6, label)
         self.ln(1)
 
     def body_text(self, text: str) -> None:
         self.set_font(self.font_name, "", 10)
         self.set_text_color(*_GREY)
-        self.multi_cell(0, 5, text)
+        self.multi_cell(0, 5, sanitize_for_pdf(text))
         self.ln(3)
 
     def tip_text(self, text: str) -> None:
         self.set_font(self.font_name, "I", 9)
         self.set_text_color(*_SILVER)
-        self.multi_cell(0, 5, f"Tip: {text}")
+        self.multi_cell(0, 5, f"Tip: {sanitize_for_pdf(text)}")
         self.ln(3)
 
 
@@ -114,23 +137,23 @@ def render_pdf(itinerary: dict, filename: str | None = None) -> str:
         os.makedirs("itineraries", exist_ok=True)
         filename = f"itineraries/{dest_slug}_{timestamp}.pdf"
 
-    font = "Arial" if _USE_TTF else "Helvetica"
+    font = "DejaVuSans" if _USE_TTF else "Helvetica"
     pdf = _TripPDF(font)
 
     if _USE_TTF:
         for style, path in _FONTS.items():
-            pdf.add_font("Arial", style=style, fname=path)
+            pdf.add_font("DejaVuSans", style=style, fname=path)
 
     pdf.set_margins(20, 20, 20)
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
 
-    dest = itinerary.get("destination", "Your Trip")
+    dest = sanitize_for_pdf(itinerary.get("destination", "Your Trip"))
 
     # Title block
     pdf.set_font(font, "B", 22)
     pdf.set_text_color(*_BLUE)
-    pdf.cell(0, 12, f"TripMind — {dest}",
+    pdf.cell(0, 12, sanitize_for_pdf(f"TripMind — {dest}"),
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font(font, "I", 9)
     pdf.set_text_color(*_SILVER)
@@ -167,7 +190,7 @@ def render_pdf(itinerary: dict, filename: str | None = None) -> str:
     for tip in itinerary.get("practical_tips", []):
         pdf.set_font(font, "", 10)
         pdf.set_text_color(*_DARK)
-        pdf.multi_cell(0, 6, f"•  {tip}")
+        pdf.multi_cell(0, 6, sanitize_for_pdf(f"•  {tip}"))
         pdf.ln(1)
 
     pdf.output(filename)
